@@ -1,0 +1,11 @@
+Bij het opstarten van de ESP wordt eerst het bestandssysteem gemount (SPIFFS/LittleFS).
+Daarna wordt er gekeken naar alle bestaande CSV-bestanden in de map /data die beginnen met “log_”.
+Als er geen bestanden zijn, wordt er een nieuw bestand aangemaakt met de naam “log_0001.csv”.
+Als er wel bestanden zijn, wordt het hoogste nummer opgezocht, dat bestand hernoemd naar “_final.csv” en een nieuw bestand aangemaakt met het volgende nummer, bijvoorbeeld “log_0008.csv”.
+Dat nieuwe bestand wordt geopend in schrijfmethode en de header “timestamp,temperature,pressure,altitude,...” wordt toegevoegd.
+
+Daarna worden de BMP280-sensor, wifi en MQTT opgestart. In de loop wordt telkens de sensor uitgelezen en een timestamp gemaakt.
+De meetwaarden worden als CSV-regel weggeschreven in het actieve bestand en tegelijk via MQTT verstuurd. Regelmatig wordt het bestand geflusht zodat data niet verloren gaat.
+
+Bij een volgende herstart herhaalt dit proces zich automatisch:
+er wordt een nieuw CSV-bestand aangemaakt met een oplopend versienummer, terwijl de vorige versies bewaard blijven met een “_final” aanduiding.
