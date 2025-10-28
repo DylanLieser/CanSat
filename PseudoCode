@@ -1,11 +1,26 @@
-Bij het opstarten van de ESP wordt eerst het bestandssysteem gemount (SPIFFS/LittleFS).
-Daarna wordt er gekeken naar alle bestaande CSV-bestanden in de map /data die beginnen met “log_”.
-Als er geen bestanden zijn, wordt er een nieuw bestand aangemaakt met de naam “log_0001.csv”.
-Als er wel bestanden zijn, wordt het hoogste nummer opgezocht, dat bestand hernoemd naar “_final.csv” en een nieuw bestand aangemaakt met het volgende nummer, bijvoorbeeld “log_0008.csv”.
-Dat nieuwe bestand wordt geopend in schrijfmethode en de header “timestamp,temperature,pressure,altitude,...” wordt toegevoegd.
+Ik laat mijn code controleren welke bestanden er al bestaan in de map /data die beginnen met “log_” en eindigen op “.csv”.
+Dit gebruik ik om te bepalen wat het laatste logbestand is dat al werd aangemaakt.
 
-Daarna worden de BMP280-sensor, wifi en MQTT opgestart. In de loop wordt telkens de sensor uitgelezen en een timestamp gemaakt.
-De meetwaarden worden als CSV-regel weggeschreven in het actieve bestand en tegelijk via MQTT verstuurd. Regelmatig wordt het bestand geflusht zodat data niet verloren gaat.
+Als er nog geen bestanden bestaan, maak ik een nieuw bestand aan met de naam “log_0001.csv”.
+Als er wel bestanden zijn, laat ik mijn programma het hoogste nummer opzoeken, bijvoorbeeld “log_0007.csv”.
+Dat bestand hernoem ik eerst naar “log_0007_final.csv”, zodat ik weet dat het een afgesloten versie is.
+Daarna maak ik automatisch een nieuw bestand aan met het volgende nummer, dus “log_0008.csv” in dit voorbeeld.
 
-Bij een volgende herstart herhaalt dit proces zich automatisch:
-er wordt een nieuw CSV-bestand aangemaakt met een oplopend versienummer, terwijl de vorige versies bewaard blijven met een “_final” aanduiding.
+Van zodra het nieuwe bestand bestaat, open ik het in schrijfmethode en schrijf ik eerst een headerregel met de kolomnamen:
+`timestamp,temperature,pressure,altitude,...`
+Zo blijft alles overzichtelijk en kan ik de data later makkelijk teruglezen of verwerken.
+
+Daarna initialiseer ik de BMP280 om temperatuur, druk en hoogte te meten.
+Ik zorg er ook voor dat mijn ESP verbinding maakt met Wi-Fi en ik start mijn MQTT-client op zodat de metingen doorgestuurd kunnen worden naar mijn broker.
+
+In de loop gebeurt het eigenlijke meten en loggen.
+Telkens als de ESP een nieuwe meting doet, lees ik de sensorgegevens uit, maak ik een timestamp, en schrijf ik de waarden in het CSV-bestand in de vorm:
+`datum,tijd,temperatuur,druk,hoogte,...`
+Dezelfde regel stuur ik ook via MQTT zodat ik de waarden in real time kan volgen of opslaan op een externe server.
+
+Ik laat het bestand regelmatig flushen zodat alle data effectief wordt weggeschreven en niets verloren gaat bij een herstart of stroomuitval.
+
+Bij een volgende opstart laat ik het hele proces opnieuw uitvoeren.
+Mijn code herkent dan automatisch het laatst gebruikte bestand, hernoemt het met “_final.csv” en maakt een nieuw bestand aan met een oplopend nummer.
+Op die manier krijg ik een duidelijke reeks versies: log_0001.csv, log_0002.csv, enzovoort.
+Zo blijft elke dataset apart bewaard per opstart, en heb ik netjes versiebeheer zonder dat ik iets manueel moet doen.
