@@ -47,16 +47,17 @@ bool sd_ok = false;                   // SD-status
 // Hulpfunctie: zoek volgend vrij versienummer
 int nextVersionNumber() {
   for (int n = 1; n < 10000; n++) {
-    char name[32];
-    snprintf(name, sizeof(name), "/CanSatSend%04d.txt", n);
+    char name[40];
+    // let op: hier zoeken we naar het _final-bestand zodat versies niet overschreven worden
+    snprintf(name, sizeof(name), "/CanSatSend%04d_final.txt", n);
     if (!SD.exists(name)) return n;
   }
   return -1;
 }
 
 // Functiedeclaraties
-void rotateBaseFileIfExists();   // Maakt backup met nieuw versienummer
-void ensureBaseFile();           // Controleert of nieuw hoofd bestand bestaat
+void rotateBaseFileIfExists();   // Maakt backup met nieuw versienummer (_final)
+void ensureBaseFile();           // Controleert of nieuw hoofd bestand bestaat + header
 void appendCSVLine(const char*); // Voegt nieuwe lijn toe aan CSV-bestand
 
 // Setup: start sensoren, WiFi, MQTT en SD-kaart
@@ -71,7 +72,7 @@ void setup() {
     while (1) delay(100);
   }
 
-  Serial.println("time_ms;hoogte_m;druk_hPa;temperatuur_C"); // CSV-header
+  Serial.println("time_ms;hoogte_m;druk_hPa;temperatuur_C"); // CSV-header op Serial
 
   WiFi.begin(SECRET_SSID, SECRET_PASS); // Verbinden met WiFi
   while (WiFi.status() != WL_CONNECTED) { Serial.print("."); delay(1000); }
@@ -87,8 +88,8 @@ void setup() {
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);  // Start SPI-bus
   sd_ok = SD.begin(SD_CS, SPI, 4000000);       // SD-kaart initialiseren
   if (sd_ok) {
-    rotateBaseFileIfExists(); // Backup oude CSV
-    ensureBaseFile();         // Maak nieuw bestand aan
+    rotateBaseFileIfExists(); // Backup oude CSV (met _final)
+    ensureBaseFile();         // Maak nieuw bestand aan + header
   } else {
     Serial.println("SD niet beschikbaar (ga toch verder met MQTT).");
   }
@@ -130,23 +131,34 @@ void rotateBaseFileIfExists() {
   if (!SD.exists(BASE_FILE)) return;
   int ver = nextVersionNumber();
   if (ver < 0) return;
-  char name[32];
-  snprintf(name, sizeof(name), "/CanSatSend%04d.txt", ver);
+  char name[40];
+  // wijziging: gebruik _final-suffix zoals in je pseudocode
+  snprintf(name, sizeof(name), "/CanSatSend%04d_final.txt", ver);
   SD.rename(BASE_FILE, name);
 }
 
-// Controleer of hoofd-CSV-bestand bestaat, anders maak nieuw aan
+// Controleer of hoofd-CSV-bestand bestaat, anders maak nieuw aan (met header)
 void ensureBaseFile() {
   if (SD.exists(BASE_FILE)) return;
   File f = SD.open(BASE_FILE, FILE_WRITE);
-  if (f) f.close();
+  if (f) {
+    // wijziging: header ook in het bestand schrijven
+    f.println("time_ms;hoogte_m;druk_hPa;temperatuur_C");
+    f.flush();
+    f.close();
+  }
 }
 
 // Voeg nieuwe lijn toe aan CSV-bestand
 void appendCSVLine(const char* line) {
   if (!sd_ok) return;
   File f = SD.open(BASE_FILE, FILE_APPEND);
-  if (!f) { sd_ok = false; return; }
+  if (!f) { 
+    sd_ok = false; 
+    Serial.println("SD write fail: open APPEND mislukt");
+    return; 
+  }
   f.println(line);
+  f.flush();  // expliciet flushen zoals in je beschrijving
   f.close();
 }
