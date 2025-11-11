@@ -24,7 +24,6 @@
 // WiFi instellingen
 #define SECRET_SSID "Proximus-Home-9270"       // WiFi netwerknaam
 #define SECRET_PASS "w9y9xb64a93zd"      // WiFi wachtwoord
-
 // MQTT instellingen
 #define BROKER  "192.168.1.51"       // Adres van MQTT broker
 #define PORT    1883                  // Brokerpoort
@@ -35,7 +34,6 @@
 // WiFi instellingen
 #define SECRET_SSID "E109-E110"       // WiFi netwerknaam
 #define SECRET_PASS "DBHaacht24"      // WiFi wachtwoord
-
 // MQTT instellingen
 #define BROKER  "192.168.0.157"       // Adres van MQTT broker
 #define PORT    1883                  // Brokerpoort
