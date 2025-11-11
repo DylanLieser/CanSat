@@ -22,6 +22,17 @@
 #define DELAY_TIME   1000             // Tijd tussen metingen (ms)
 
 // WiFi instellingen
+#define SECRET_SSID "Proximus-Home-9270"       // WiFi netwerknaam
+#define SECRET_PASS "w9y9xb64a93zd"      // WiFi wachtwoord
+
+// MQTT instellingen
+#define BROKER  "192.168.1.51"       // Adres van MQTT broker
+#define PORT    1883                  // Brokerpoort
+#define TOPIC   "CanSat"              // Topic voor data
+#define MSG_LEN 120                   // Maximale berichtlengte
+
+/*
+// WiFi instellingen
 #define SECRET_SSID "E109-E110"       // WiFi netwerknaam
 #define SECRET_PASS "DBHaacht24"      // WiFi wachtwoord
 
@@ -30,6 +41,7 @@
 #define PORT    1883                  // Brokerpoort
 #define TOPIC   "CanSat"              // Topic voor data
 #define MSG_LEN 120                   // Maximale berichtlengte
+*/
 
 // SD-kaart instellingen
 #define SD_CS   25                    // CS-pin SD-module
