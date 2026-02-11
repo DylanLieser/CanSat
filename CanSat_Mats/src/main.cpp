@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// CanSat Project 2025 - Team SkyByte
+// CanSat Project 2025-2026 - Team SkyByte
 // - BMP280 sensor reading                                                 done
 // - GPS module reading                                                    done
 // - Data logging to SD card                                               done
@@ -8,60 +8,95 @@
 // Do this loop every 1 sec.
 //
 // Notes:
-//
+// 
 // (1) Set LoRa sync word the same at transmitter & receiver
 // (2) LoRa frequency is set for Europe (866 MHz)
 // ----------------------------------------------------------------------------
 
-// ----------------------------------------------------------------------------
-// CanSat Project 2025
-// CanSat - BMP280 sensor reading and publishing via MQTT    (no error handling for MQTT)
-// CanSat - Data logging to SD card with versioned filenames (no error handling for MQTT)
-//        -> (data gets send to MQTT without errors when sd is not available, but slower)
-//        -> (data printed to serial when sd is not available, but with error code)
-//        -> (uploading code sometimes causes to create 2 (or more) new files, resetting ESP32 causes to create 1 new file (=good))
-// CanSat - GPS (TinyGPS++) integration for live position data in CSV
-// ----------------------------------------------------------------------------
-
-#include <Adafruit_BMP280.h>     // BMP280
-#include <Adafruit_Sensor.h>     // Adafruit unified sensor base
-#include <Arduino.h>             // Arduino core
-#include <ArduinoMqttClient.h>   // MQTT client
-#include <LoRa.h>                // LoRa
-#include <SD.h>                  // SD card
-#include <SPI.h>                 // SPI bus
-#include <TinyGPSPlus.h>         // GPS parsing (TinyGPS++)
-#include <WiFi.h>                // ESP32 WiFi
+#include <Arduino.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <time.h>
+#include "SPI.h"                 // SPI
 #include <Wire.h>                // I2C
-#include <stdio.h>               // snprintf
-#include <sys/time.h>            // settimeofday
-#include <time.h>                // struct tm, time_t, mktime
-#include "Secret.h"              // WIFI + MQTT credentials
+#include <Adafruit_Sensor.h>     // Adafruit unified sensor base
+#include <Adafruit_BMP280.h>     // BMP280 
+#include <SD.h>                  // SD card 
+#include <TinyGPSPlus.h>         // GPS parsing (TinyGPS++)
+#include <LoRa.h>                // LoRa
 
-// Declarations
-void printValues(),writeToSD(String data),saveLastVersion(int newLast),serviceGPS(unsigned long ms); // Create + publish + log CSV line
-bool I2C_check(TwoWire *bus, byte address);                                                          // I2C device presence check
-int  readLastVersion();                                                                              // Read last used version from VERSION_FILE (create with 0 if missing)
+// Declarations functions
+void printValues();                                  // Create + publish + log CSV line
+bool I2C_check(TwoWire *bus, byte address);          // I2C device presence check
+void writeToSD(String data);                         // Append one CSV line to current file
+int  readLastVersion();                              // Read last used version from VERSION_FILE (create with 0 if missing)
+void saveLastVersion(int newLast);                   // Store last used version back to VERSION_FILE
+void serviceGPS(unsigned long ms);                   // Read and parse NMEA data, keep last valid GPS values
+
+void sendMsg( String outgoing );
+void readRPi( String &msg );
+void readBMP280( String &msg );
+void readGPS( String &msg );
+void setManualDateTime(int year, int month, int day, int hour, int minute, int second);
+String getFormattedTime();
 
 #define MSG_LEN 120
+#define DELAY_TIME 1000 // Delay time between measurements (ms)
 
-// Sea level pressure (hPa) used for altitude calculation
-#define SEALEVELPRESSURE_HPA (1015.8)
+#define DEBUG // define / undefine to enable / disable debug mode
+#define START_OF_NEW_TRANSMISSION "START-OF-NEW-TRANSMISSION"
+
+#define csPIN     5  // Set chip select PIN for SPI connection 
+#define resetPIN  14 // Set reset PIN for SPI connection
+#define irqPIN    2  // Set IReq PIN for SPIconnection        
+
+// --------------- LoRa Settings ---------------
+// Frequentie-instelling (voor Europa: 868 MHz)
+#define LORA_FREQ 868E6
+
+// Adresinstellingen
+#define SENDER_ADDRESS   0xAA
+#define RECEIVER_ADDRESS 0xBB
+#define LORA_ID          0x1B
+
+// LoRa Paremeters
+// Voor lange afstand — lage datasnelheid, hoge gevoeligheid
+#define TxPower         20      // maximaal vermogen
+#define SignalBandwidth 125E3   // 125 kHz standaard
+#define CodingRate4     5       // 4/5 codering
+#define SpreadingFactor 10      // 6–12 (hoger = groter bereik)
+#define CRC             1       // CRC validatie AAN  
+// #define SYNCWORD  0xF3 // Set Syncword for LoRa transmitter
+                          // !! ensure same syncword is used at LoRa receiver
+
+// General defines
+#define MSG_LEN   150 // Message lengt of to be transmitted message
+#define DELIMETER ";" // Set CSV DELIMETER to ;
+#define DELAY_TIME  10000 // Delay time between 2 transmissions
+
+// Define record types
+#define MOTOR_RECORD  "M"
+#define BMP_RECORD    "B"
+#define GPS_RECORD    "G"
+
+// Set the value of the sea level pressure correct at your location
+// You can find it at https://www.meteo.be/nl/weer/waarnemingen/belgie
+// If you do so, the height will be calculated approx. correctly.
+// + or - 8 m height difference is normal, as the sensor has a deviation.
+#define SEALEVELPRESSURE_HPA (989.5)
 
 // BMP280 I2C address (some boards use 0x77)
 #define BMP280_ADR 0x76
 
-// Non-default pins for I2C connection (secondary I2C bus on ESP32)
-#define SDA_2 32    // Secondary I2C SDA pin
-#define SCL_2 33    // Secondary I2C SCL pin
+// Non-default pins for I2C connection
+#define SDA_2 32    // Use this pin as secondary I2C SDA connection
+#define SCL_2 33    // Use this pin as secondary I2C SCL connection
 
-#define DELAY_TIME 1000 // Delay time between measurements (ms)
-
-// SD Card SPI pins
-#define SD_CS_PIN   25    // SD Card CS  = GPIO25
-#define SD_MOSI_PIN 23    // SD MOSI     = GPIO23
-#define SD_MISO_PIN 19    // SD MISO     = GPIO19
-#define SD_SCK_PIN  18    // SD SCK      = GPIO18
+// SD Card SPI pins 
+#define SD_CS_PIN   25    // CS        = GPIO25
+#define SD_MOSI_PIN 23    // MOSI (DI) = GPIO23
+#define SD_MISO_PIN 19    // MISO (DO) = GPIO19
+#define SD_SCK_PIN  18    // SCK (CLK) = GPIO18
 
 // Filenames / paths on SD
 #define DATA_FILE_BASE "/CanSatSend"        // Base name for data files
@@ -80,98 +115,47 @@ Adafruit_BMP280 bmp(&I2Ctwo);
 
 bool bmp_connected = false;    // Tracks BMP280 availability
 bool sd_available = false;     // Tracks SD availability
-int currentVersion;            // Version number (saved on SD)
+int currentVersion;            // version number (saved on SD)
 String currentFilename = "";   // Active data filename for this session
 
-// WiFi + MQTT clients (not used for LoRa transmission, kept for code history)
-WiFiClient  wifiClient;
-MqttClient  mqttClient(wifiClient);
-
-HardwareSerial GPSSerial(2);   // UART2 for GPS (hardware serial 2)
+HardwareSerial GPSSerial(2);   // Use UART2 for GPS (hardware serial 2)
 TinyGPSPlus gps;               // TinyGPS++ parser instance
 
 int    gps_sats = 0;           // Last valid satellites count
 float  gps_hdop = 0.0;         // Last valid HDOP
 double gps_lat  = 0.0;         // Last valid latitude
 double gps_lon  = 0.0;         // Last valid longitude
+
+int  msgCount = 1;             // Set trasmit message counter to start
+
 double gps_altm = 0.0;         // Last valid GPS altitude in meters
-
-#define VERSION 1.0
-
-#define DEBUG // define / undefine to enable / disable debug mode
-#define START_OF_NEW_TRANSMISSION "START-OF-NEW-TRANSMISSION"
-
-#define csPIN     5  // LoRa chip select pin (SPI)
-#define resetPIN  14 // LoRa reset pin
-#define irqPIN    2  // LoRa IRQ pin
-
-// --------------- LoRa Settings ---------------
-// Frequency setting (for Europe: 868 MHz)
-#define LORA_FREQ 868E6
-
-// Address settings
-#define SENDER_ADDRESS   0xAA
-#define RECEIVER_ADDRESS 0xBB
-#define LORA_ID          0x1B
-
-// LoRa parameters
-#define TxPower         20      // Transmit power
-#define SignalBandwidth 125E3   // Bandwidth
-#define CodingRate4     5       // Coding rate 4/5
-#define SpreadingFactor 10      // Spreading factor (6–12)
-#define CRC             1       // CRC validation enabled
-// #define SYNCWORD  0xF3 // Syncword for LoRa transmitter
-                       // Same syncword is used at LoRa receiver
-
-// General defines
-#define MSG_LEN   150 // Message length of transmitted message
-#define DELIMETER ";" // CSV delimiter
-#define DELAY_TIME  10000 // Delay time between 2 transmissions
-
-// Define record types
-#define MOTOR_RECORD  "M"
-#define BMP_RECORD    "B"
-#define GPS_RECORD    "G"
-
-// Declare functions
-void sendMsg( String outgoing );
-void readRPi( String &msg );
-void readBMP280( String &msg );
-void readGPS( String &msg );
-float randomFloatDec2(float minVal, float maxVal );
-void setManualDateTime(int year, int month, int day, int hour, int minute, int second);
-String getFormattedTime();
-
-int  msgCount = 1; // Transmit message counter
 
 // -------------------------------------------------------------------------
 // This is the onetime used setup function
-// (1) Start LoRa connection (in Europe)
-// (2) Send a START-OF-NEW-TRANSMISSION message to the receiver
+// (1) aanvullen
+// (2) 
+// (3)
 // -------------------------------------------------------------------------
 void setup() {
   unsigned status;
   unsigned bmp_status; // Holds BMP initialization result
 
-  // Set time: YYYY, MM, DD, HH, MM, SS
+  // Stel tijd in: YYYY, MM, DD, HH, MM, SS
   setManualDateTime(2025, 11, 17, 15, 22, 00); // Set manual date/time to 17-11-2025 15:22:00
 
-  randomSeed(esp_random()); // Reset random generator
-
-  // (1) --- USB Serial Monitor start ------------------------------
+  // Serial Monitor start
   Serial.begin( 115200 ); 
   while (!Serial) {
     delay( 10 );
   }
   delay( 200 ); // Short delay to allow printout message on serial monitor
   Serial.println( "=======================================" );
-  Serial.print( "Start of Program\tVersion: " );
-  Serial.println( VERSION );
+  Serial.print( "Start of Program\n" );
   Serial.println( "=======================================" );
   
-  // SD card
+  // SD card 
   Serial.println("----------------------------------------------------------------------");
-  Serial.println("\nInitializing SD card...");
+  Serial.println("\nInitialiseren SD kaart...");
 
   // Initialize the SPI bus with explicit pins
   SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
@@ -179,19 +163,19 @@ void setup() {
 
   // Initialize SD card
   if (!SD.begin(SD_CS_PIN, SPI)) {
-    Serial.println("SD card initialization failed!");
+    Serial.println("SD kaart initialisatie mislukt!");
     sd_available = false; // Continue without logging
   } else {
-    Serial.println("SD card successfully initialized");
+    Serial.println("SD kaart succesvol geïnitialiseerd");
 
     // Optional: print SD card info (size/type)
     uint64_t cardSize = SD.cardSize() / (1024ULL * 1024ULL);
-    Serial.print("SD card size: ");
+    Serial.print("SD kaart grootte: ");
     Serial.print(cardSize);
     Serial.println(" MB");
 
     uint8_t cardType = SD.cardType();
-    Serial.print("SD card type: ");
+    Serial.print("SD kaart type: ");
     if (cardType == CARD_MMC) {
       Serial.println("MMC");
     } else if (cardType == CARD_SD) {
@@ -211,33 +195,33 @@ void setup() {
 
     // Build filename for this session
     currentFilename = String(DATA_FILE_BASE) + String(currentVersion) + ".txt";
-    Serial.print("Logging data to: ");
+    Serial.print("Data wordt weggeschreven naar: ");
     Serial.println(currentFilename);
 
     saveLastVersion(currentVersion);
   }
 
-  // (1) --- Start LoRa communication -------------------------------
+  // Start LoRa communication
   LoRa.setPins( csPIN, resetPIN, irqPIN );
 
-  // Start LoRa module
+  // Start de LoRa-module
   if (!LoRa.begin(LORA_FREQ)) {
-    Serial.println("Error: LoRa module start failed!");
+    Serial.println("Fout: kon LoRa-module niet starten!");
     while (1);
   }
 
-  // Long range parameters — low data rate, high sensitivity
-  LoRa.setTxPower( TxPower );                   // Transmit power
-  LoRa.setSignalBandwidth( SignalBandwidth );   // Bandwidth
-  LoRa.setCodingRate4( CodingRate4 );           // Coding rate
-  LoRa.setSpreadingFactor( SpreadingFactor );   // Spreading factor
+  // Voor lange afstand — lage datasnelheid, hoge gevoeligheid
+  LoRa.setTxPower( TxPower );                   // maximaal vermogen
+  LoRa.setSignalBandwidth( SignalBandwidth );   // 125 kHz standaard
+  LoRa.setCodingRate4( CodingRate4 );           // 4/5 codering
+  LoRa.setSpreadingFactor( SpreadingFactor );   // 6–12 (hoger = groter bereik)
   #if CRC
-    LoRa.enableCrc();                           // CRC enabled
+    LoRa.enableCrc();                           // CRC aan (idem pico )
   #endif
 
   Serial.println( "1. => LoRa module successful connected (SPI)" );   
   
-  // (2) --- Send Start of new transmission to receiver --------
+  // Send Start of new transmission to receiver
   sendMsg( START_OF_NEW_TRANSMISSION );
   Serial.printf( "\t%s\n", START_OF_NEW_TRANSMISSION ); 
   Serial.println( "2. => Start of new transmission message send to receiver" );
@@ -253,7 +237,7 @@ void setup() {
   } else {
     bmp_connected = true;  // Sensor found
 
-    // Configure oversampling/filter
+    // Optional: configure oversampling/filter to improve stability/noise
     bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
                     Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
                     Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
@@ -274,12 +258,12 @@ void setup() {
 
 // -------------------------------------------------------------------------
 // This is the loop function
-//  
-//  (4) Send CSV record though LoRa
-//  (5) Print CSV record on Serial monitor
-//  (6) delay for 1 sec
+// (1) 
+// (2)
+// (3)
 // Restart loop
 // -------------------------------------------------------------------------
+
 void loop() {
   String RPi_msg = "";
   String BMP_msg = "";
@@ -321,28 +305,27 @@ void loop() {
 
 
 // -------------------------------------------------------------------------
-// This function sends the output CSV record through LoRa
-// to the receiver
+// This function sends the output CSV record through LoRa to the receiver
 // -------------------------------------------------------------------------
 void sendMsg( String outgoing ) {
   char buffer[MSG_LEN];
 
-  outgoing.toCharArray(buffer, MSG_LEN); // Convert String to char array
+  outgoing.toCharArray(buffer, MSG_LEN); // convert String to char array
 
   // Transmit msg through LoRa
   LoRa.beginPacket();
-  // Add receiver address, sender address, ID and message length to the LoRa header
+  // Voeg ontvangeradres, zenderadres, ID en bericht lengte toe aan de LoRa header
     LoRa.write(RECEIVER_ADDRESS);
     LoRa.write(SENDER_ADDRESS);
     LoRa.write( LORA_ID );
-    LoRa.write( strlen( buffer ) ); // Message length
+    LoRa.write( strlen( buffer ) ); // bericht lengte
 
-    // Add message payload as one block
+    // Voeg het bericht toe als één blok
     LoRa.write((const uint8_t*)buffer, strlen( buffer ) );
   
   LoRa.endPacket();
 
-  msgCount++; // Increment the message counter
+  msgCount++; // increment the message counter
 }
 
 // -------------------------------------------------------------------------
@@ -351,14 +334,18 @@ void sendMsg( String outgoing ) {
 // The CSV-record is set to include the desired stage of the engines
 // -------------------------------------------------------------------------
 void readRPi( String &msg ) {
-    int engine1 = random( 0, 2 ); // Simulate engine 1 state (0=off, 1=on)
-    int engine2 = random( 0, 2 ); // Simulate engine 2 state (0=off, 1=on)
+    // Simulate turning state (0=false, 1=true)
+    int turnL = 0; 
+    int turnR = 1;
 
-    msg = String( MOTOR_RECORD ) + DELIMETER + String(engine1) + DELIMETER + String(engine2);
+    // State of landing position
+    String state = "Unsafe";
+
+    msg = String( MOTOR_RECORD ) + DELIMETER + String(turnL) + DELIMETER + String(turnR) + DELIMETER + state;
 }
 
 // -------------------------------------------------------------------------
-// This function reads values from the BME280 Sensor
+// This function reads values from the BMP280 Sensor
 // and appends them to he CSV-record 
 // Values read and appended are: Temperature in °C
 //                               Pressure in Pa
@@ -374,7 +361,7 @@ void readBMP280( String &msg ) {
   }
 
   float temp = bmp.readTemperature();                 // °C
-  float press = bmp.readPressure() / 100.0F;          // hPa
+  float press = bmp.readPressure() / 100.0F;          // hPa 
   float alt = bmp.readAltitude(SEALEVELPRESSURE_HPA); // m
 
   msg = String( BMP_RECORD ) + DELIMETER;
@@ -387,10 +374,10 @@ void readBMP280( String &msg ) {
 // This function reads values from the GPS Module
 // and appends them to he CSV-record 
 // Values read and appended are: Number of satelites in vieuw
-//                               Quality of GPS data
-//                               GPS coordinates - latitude, longitude
-//                               GPS time in GMT time
-//                               GPS altitude
+// Quality of GPS data
+// GPS coordinates - latitude, longitude
+// GPS time in GMT time
+// GPS altitude
 // Note: altitude can only be measured with > 3 satelites in view
 // Ot may take a while before the GPS sensor "connects" to GPOS satelites
 // Therefore start this program well ahead of rocket launch to ensure proper 
@@ -423,21 +410,13 @@ void readGPS( String &msg ) {
   msg = msg + String( altitude, 2 );
 }
 
-float randomFloatDec2(float minVal, float maxVal) {
-    int minInt = minVal * 100;   // Scale to integer
-    int maxInt = maxVal * 100;
-
-    int value = random(minInt, maxInt + 1);  // Random integer
-    return( (float)( value / 100.0 ) );      // Back to float with 2 decimals
-}
-
-// ----- Manually set date/time -----
+// ----- Handmatig datum/tijd instellen ----
 void setManualDateTime(int year, int month, int day, int hour, int minute, int second)
 {
     struct tm timeinfo = {};
 
-    timeinfo.tm_year = year - 1900;  // Year since 1900
-    timeinfo.tm_mon  = month - 1;    // Month [0..11]
+    timeinfo.tm_year = year - 1900;  // jaar vanaf 1900
+    timeinfo.tm_mon  = month - 1;    // maanden tellen vanaf 0
     timeinfo.tm_mday = day;
     timeinfo.tm_hour = hour;
     timeinfo.tm_min  = minute; 
@@ -452,7 +431,7 @@ String getFormattedTime() {
     struct tm timeinfo;
 
     if (!getLocalTime(&timeinfo)) {
-        return "00-00-00:00:00:00";   // Fallback
+        return "00-00-00:00:00:00";   // fallback
     }
 
     char buffer[20];
@@ -472,7 +451,7 @@ void writeToSD(String data) {
     dataFile.println(data);
     dataFile.close();
   } else {
-    Serial.println("Error: could not write to SD card");
+    Serial.println("Fout: kon niet schrijven naar SD kaart");
   }
 }
 
@@ -486,7 +465,7 @@ bool I2C_check(TwoWire *bus, byte address) {
 // readLastVersion(): read last used version (create with "0" if missing)
 int readLastVersion() {
   // The file stores the LAST used version number.
-  // If it does not exist, it is created with "0"
+  // Doesn't exist? Create it with "0"
   int lastUsed = 0;
 
   File versionFileRead = SD.open(VERSION_FILE, FILE_READ);
@@ -497,7 +476,7 @@ int readLastVersion() {
       versionFileCreate.close();
     }
     lastUsed = 0;
-    Serial.println("Version file created with last version 0");
+    Serial.println("Versie bestand aangemaakt met laatste versie 0");
   } else {
     String versionStr = versionFileRead.readStringUntil('\n');
     versionFileRead.close();
@@ -510,14 +489,14 @@ int readLastVersion() {
 
 // saveLastVersion(): store last used version number
 void saveLastVersion(int newLast) {
-  // Store current version as "last used"
+  // Sla de HUIDIGE versie terug op als "laatst gebruikt"
   File versionFileWrite = SD.open(VERSION_FILE, FILE_WRITE);
   if (versionFileWrite) {
     versionFileWrite.seek(0);          // Go to start of file
     versionFileWrite.println(newLast); // last used = current
     versionFileWrite.close();
   } else {
-    Serial.println("Error: could not update version number");
+    Serial.println("Fout: kon versienummer niet bijwerken");
   }
 }
 
