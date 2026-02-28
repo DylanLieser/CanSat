@@ -41,9 +41,10 @@ void setManualDateTime(int year, int month, int day, int hour, int minute, int s
 String getFormattedTime();
 
 #define MSG_LEN 120
-#define DELAY_TIME 1000 // Delay time between measurements (ms)
+#define DELAY_TIME 1000 // Delay time between measurements (ms) & Delay time between 2 transmissions
 
 #define DEBUG // define / undefine to enable / disable debug mode
+
 #define START_OF_NEW_TRANSMISSION "START-OF-NEW-TRANSMISSION"
 
 #define csPIN     5  // Set chip select PIN for SPI connection 
@@ -72,7 +73,6 @@ String getFormattedTime();
 // General defines
 #define MSG_LEN   150 // Message lengt of to be transmitted message
 #define DELIMETER ";" // Set CSV DELIMETER to ;
-#define DELAY_TIME  10000 // Delay time between 2 transmissions
 
 // Define record types
 #define MOTOR_RECORD  "M"
@@ -130,12 +130,6 @@ int  msgCount = 1;             // Set trasmit message counter to start
 
 double gps_altm = 0.0;         // Last valid GPS altitude in meters
 
-// -------------------------------------------------------------------------
-// This is the onetime used setup function
-// (1) aanvullen
-// (2) 
-// (3)
-// -------------------------------------------------------------------------
 void setup() {
   unsigned status;
   unsigned bmp_status; // Holds BMP initialization result
@@ -216,7 +210,7 @@ void setup() {
   LoRa.setCodingRate4( CodingRate4 );           // 4/5 codering
   LoRa.setSpreadingFactor( SpreadingFactor );   // 6–12 (hoger = groter bereik)
   #if CRC
-    LoRa.enableCrc();                           // CRC aan (idem pico )
+    LoRa.enableCrc();                           // CRC aan (idem pico)
   #endif
 
   Serial.println( "1. => LoRa module successful connected (SPI)" );   
@@ -256,14 +250,6 @@ void setup() {
   Serial.println();
 }
 
-// -------------------------------------------------------------------------
-// This is the loop function
-// (1) 
-// (2)
-// (3)
-// Restart loop
-// -------------------------------------------------------------------------
-
 void loop() {
   String RPi_msg = "";
   String BMP_msg = "";
@@ -302,7 +288,6 @@ void loop() {
 
   delay( DELAY_TIME );
 }
-
 
 // -------------------------------------------------------------------------
 // This function sends the output CSV record through LoRa to the receiver
@@ -374,10 +359,10 @@ void readBMP280( String &msg ) {
 // This function reads values from the GPS Module
 // and appends them to he CSV-record 
 // Values read and appended are: Number of satelites in vieuw
-// Quality of GPS data
-// GPS coordinates - latitude, longitude
-// GPS time in GMT time
-// GPS altitude
+//                               Quality of GPS data
+//                               GPS coordinates - latitude, longitude
+//                               GPS time in GMT time
+//                               GPS altitude
 // Note: altitude can only be measured with > 3 satelites in view
 // Ot may take a while before the GPS sensor "connects" to GPOS satelites
 // Therefore start this program well ahead of rocket launch to ensure proper 
@@ -410,7 +395,7 @@ void readGPS( String &msg ) {
   msg = msg + String( altitude, 2 );
 }
 
-// ----- Handmatig datum/tijd instellen ----
+// Handmatig datum/tijd instellen
 void setManualDateTime(int year, int month, int day, int hour, int minute, int second)
 {
     struct tm timeinfo = {};
@@ -440,9 +425,6 @@ String getFormattedTime() {
     return String(buffer);
 }
 
-// -------------------------------------------------------------------------
-// From code 1: SD + I2C + GPS service helpers
-// -------------------------------------------------------------------------
 
 // writeToSD(): append one CSV line to currentFilename
 void writeToSD(String data) {
